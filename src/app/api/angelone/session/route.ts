@@ -1,92 +1,45 @@
 /**
  * Angel One SmartAPI session endpoint — DATA ACCESS ONLY.
  *
- * Performs loginByPassword server-side so ANGELONE_* secrets never reach the
- * browser, and returns only the tokens the client needs for the market-data
- * WebSocket. This route must never be extended to proxy order placement;
- * trading on this platform is paper-only by design.
+ * Logs in server-side (secrets never reach the browser), caches the session in
+ * process, and warms the instrument master. Returns only a status flag — the
+ * client needs no tokens because every data call is proxied through our own
+ * routes. This route must never proxy order placement; trading is paper-only.
  *
- * Without credentials configured it responds 503 with a clear reason — the
- * client falls back to the mock provider.
+ * Responses:
+ *   200 { ok: true }                          — live session ready
+ *   503 { ok: false, reason, missing? }       — credentials not configured
+ *   502 { ok: false, reason }                 — login/master failed
  */
 
 import { NextResponse } from "next/server";
-import { generateTOTP } from "@/lib/market/angelone/totp";
-
-const LOGIN_URL =
-  "https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword";
-
-interface AngelLoginResponse {
-  status: boolean;
-  message: string;
-  data?: {
-    jwtToken: string;
-    refreshToken: string;
-    feedToken: string;
-  };
-}
+import { getMaster } from "@/lib/market/angelone/instrument-master";
+import {
+  AngelCredsError,
+  AngelLoginError,
+  getAngelSession,
+} from "@/lib/market/angelone/session-store";
 
 export async function POST(): Promise<NextResponse> {
-  const apiKey = process.env.ANGELONE_API_KEY;
-  const clientCode = process.env.ANGELONE_CLIENT_CODE;
-  const pin = process.env.ANGELONE_PIN;
-  const totpSecret = process.env.ANGELONE_TOTP_SECRET;
-
-  const missing = [
-    !apiKey && "ANGELONE_API_KEY",
-    !clientCode && "ANGELONE_CLIENT_CODE",
-    !pin && "ANGELONE_PIN",
-    !totpSecret && "ANGELONE_TOTP_SECRET",
-  ].filter(Boolean);
-
-  if (missing.length > 0) {
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: `Angel One credentials not configured (missing ${missing.join(", ")}). See .env.example.`,
-      },
-      { status: 503 },
-    );
-  }
-
   try {
-    const totp = await generateTOTP(totpSecret!);
-    const res = await fetch(LOGIN_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-UserType": "USER",
-        "X-SourceID": "WEB",
-        "X-ClientLocalIP": "127.0.0.1",
-        "X-ClientPublicIP": "127.0.0.1",
-        "X-MACAddress": "00:00:00:00:00:00",
-        "X-PrivateKey": apiKey!,
-      },
-      body: JSON.stringify({ clientcode: clientCode, password: pin, totp }),
-      cache: "no-store",
-    });
-    const body = (await res.json()) as AngelLoginResponse;
-    if (!body.status || !body.data) {
+    await getAngelSession();
+    // Warm the instrument master so the first quote/chain call is fast.
+    await getMaster();
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    if (err instanceof AngelCredsError) {
       return NextResponse.json(
-        { ok: false, reason: `Angel One login failed: ${body.message}` },
-        { status: 502 },
+        { ok: false, reason: err.message, missing: err.missing },
+        { status: 503 },
       );
     }
-    // feedToken is required for the market-data WebSocket; jwtToken for REST
-    // data endpoints. No order-scope usage exists in this codebase.
-    return NextResponse.json({
-      ok: true,
-      feedToken: body.data.feedToken,
-      jwtToken: body.data.jwtToken,
-      apiKey,
-      clientCode,
-    });
-  } catch (err) {
+    if (err instanceof AngelLoginError) {
+      return NextResponse.json({ ok: false, reason: err.message }, { status: 502 });
+    }
     return NextResponse.json(
       {
         ok: false,
-        reason: `Angel One login request errored: ${err instanceof Error ? err.message : "unknown"}`,
+        reason: `Angel One session error: ${err instanceof Error ? err.message : "unknown"}`,
       },
       { status: 502 },
     );

@@ -25,17 +25,29 @@ export function DataSourceBadge() {
     );
   }
   const connected = info.connectionState === "connected";
+  const errored = info.connectionState === "error" || !!info.fallbackReason;
+  const label = connected ? "LIVE" : errored ? "LIVE UNAVAILABLE" : info.connectionState.toUpperCase();
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
         connected
           ? "border-up/40 bg-up-muted text-up"
-          : "border-border bg-surface-2 text-ink-3"
+          : errored
+            ? "border-down/40 bg-down-muted text-down"
+            : "border-border bg-surface-2 text-ink-3"
       }`}
-      title={`${info.displayName} — ${info.connectionState}`}
+      title={
+        info.fallbackReason
+          ? `${info.displayName}: ${info.fallbackReason}`
+          : `${info.displayName} — ${info.connectionState}`
+      }
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-up" : "bg-ink-3"}`} />
-      {connected ? "LIVE" : info.connectionState.toUpperCase()}
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          connected ? "bg-up" : errored ? "bg-down" : "bg-ink-3"
+        }`}
+      />
+      {label}
     </span>
   );
 }

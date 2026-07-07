@@ -1,33 +1,35 @@
+"use client";
+
 /**
- * ANGEL ONE (SmartAPI) — market-DATA-only provider scaffold.
+ * ANGEL ONE (SmartAPI) — live market-DATA provider.
  *
  * ── Safety boundary ────────────────────────────────────────────────────────
- * This class implements the MarketDataProvider interface ONLY. There is no
- * order-placement code anywhere in this module (or this repository) — all
- * trading on this platform is paper trading executed by the local engine in
- * src/lib/trading. Do not add order APIs here.
+ * DATA ONLY. This class implements MarketDataProvider and nothing else — there
+ * is no order-placement code here or anywhere in the repo. All trading is paper
+ * trading in src/lib/trading. Do not add order APIs.
  * ───────────────────────────────────────────────────────────────────────────
  *
- * Status: UNTESTED SCAFFOLD. It compiles and fails gracefully, but has never
- * run against real credentials. Wiring it live requires:
- *   1. Server env vars (see .env.example) — the login flow runs in the route
- *      handler at /api/angelone/session so the API key, PIN and TOTP secret
- *      never reach the browser.
- *   2. Instrument-master mapping (Angel One symboltoken ↔ our Instrument),
- *      via their published OpenAPIScripMaster JSON.
- *   3. SmartAPI WebSocket 2.0 (wss://smartapisocket.angelone.in/smart-stream)
- *      binary frame parsing for live ticks.
- * Until then the provider factory falls back to the mock provider and the UI
- * shows a "SIMULATED" badge.
+ * Transport: the browser never holds Angel credentials or tokens. Every call
+ * goes through our own /api/angelone/* routes, which log in server-side and
+ * proxy Angel's REST market-data endpoints.
+ *
+ * Streaming: SmartStream 2.0 requires auth *headers* a browser WebSocket can't
+ * set, so live updates use a single consolidated poller against the batch
+ * getMarketData endpoint — ~1s while the market is open, slowed right down when
+ * closed (a closed market has no new ticks; values simply hold at last trade).
+ * Nothing is simulated: if the feed is unavailable, cells stop updating rather
+ * than showing invented movement.
  */
 
 import type {
   Candle,
   Instrument,
   ListedQuote,
+  MarketDepth,
   Movers,
   OptionChain,
   Quote,
+  Timeframe,
 } from "../types";
 import {
   ProviderUnavailableError,
@@ -35,14 +37,44 @@ import {
   type MarketDataProvider,
   type Unsubscribe,
 } from "../provider";
+import { getMarketStatus } from "../status";
+import {
+  EQUITY_INSTRUMENTS,
+  EQUITY_TOKENS,
+  INDEX_INSTRUMENTS,
+  INDEX_TOKENS,
+  OPTION_UNDERLYING_INSTRUMENTS,
+  equityInstrument,
+  indexInstrument,
+  INDICES,
+  EQUITIES,
+} from "./universe";
+import { LivePoller } from "./live-poller";
 
-interface SessionResponse {
-  ok: boolean;
-  reason?: string;
-  feedToken?: string;
-  jwtToken?: string;
-  apiKey?: string;
-  clientCode?: string;
+interface QuoteResponse {
+  quotes: Quote[];
+  depth: Record<string, MarketDepth>;
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const reason = await res
+      .json()
+      .then((b) => (b as { reason?: string }).reason)
+      .catch(() => undefined);
+    throw new Error(reason ?? `Request failed (${res.status})`);
+  }
+  return (await res.json()) as T;
+}
+
+async function fetchQuotes(tokens: string[]): Promise<QuoteResponse> {
+  if (tokens.length === 0) return { quotes: [], depth: {} };
+  return postJson<QuoteResponse>("/api/angelone/quote", { tokens });
 }
 
 export class AngelOneMarketDataProvider implements MarketDataProvider {
@@ -52,57 +84,29 @@ export class AngelOneMarketDataProvider implements MarketDataProvider {
 
   private state: ConnectionState = "disconnected";
   private stateListeners = new Set<(s: ConnectionState) => void>();
-  private session: SessionResponse | null = null;
-  private ws: WebSocket | null = null;
+  private poller = new LivePoller(fetchQuotes, getMarketStatus);
+  private equityByToken = new Map(EQUITY_INSTRUMENTS.map((i) => [i.token, i]));
 
   async connect(): Promise<void> {
     this.setState("connecting");
-    let res: Response;
+    let body: { ok: boolean; reason?: string };
     try {
-      res = await fetch("/api/angelone/session", { method: "POST" });
-    } catch {
+      const res = await fetch("/api/angelone/session", { method: "POST" });
+      body = (await res.json()) as { ok: boolean; reason?: string };
+      if (!res.ok || !body.ok) {
+        this.setState("error");
+        throw new ProviderUnavailableError(this.id, body.reason ?? "Angel One session unavailable.");
+      }
+    } catch (err) {
       this.setState("error");
-      throw new ProviderUnavailableError(
-        this.id,
-        "Could not reach the Angel One session endpoint.",
-      );
+      if (err instanceof ProviderUnavailableError) throw err;
+      throw new ProviderUnavailableError(this.id, "Could not reach the Angel One session endpoint.");
     }
-    const body = (await res.json()) as SessionResponse;
-    if (!res.ok || !body.ok || !body.feedToken) {
-      this.setState("error");
-      throw new ProviderUnavailableError(
-        this.id,
-        body.reason ?? "Angel One session unavailable.",
-      );
-    }
-    this.session = body;
-    this.openWebSocket();
-  }
-
-  private openWebSocket(): void {
-    if (!this.session?.feedToken) return;
-    // SmartAPI WebSocket 2.0. Auth headers are passed via query params for
-    // browser clients per Angel One's smartapi-javascript reference client.
-    const url =
-      "wss://smartapisocket.angelone.in/smart-stream" +
-      `?clientCode=${encodeURIComponent(this.session.clientCode ?? "")}` +
-      `&feedToken=${encodeURIComponent(this.session.feedToken)}` +
-      `&apiKey=${encodeURIComponent(this.session.apiKey ?? "")}`;
-    this.ws = new WebSocket(url);
-    this.ws.binaryType = "arraybuffer";
-    this.ws.onopen = () => this.setState("connected");
-    this.ws.onerror = () => this.setState("error");
-    this.ws.onclose = () => this.setState("disconnected");
-    this.ws.onmessage = () => {
-      // TODO(angelone): parse SmartStream binary tick frames into Quote
-      // objects and fan out to subscribeQuotes listeners. Requires live
-      // credentials to develop against — intentionally left unimplemented.
-    };
+    this.setState("connected");
   }
 
   disconnect(): void {
-    this.ws?.close();
-    this.ws = null;
+    this.poller.stop();
     this.setState("disconnected");
   }
 
@@ -120,44 +124,112 @@ export class AngelOneMarketDataProvider implements MarketDataProvider {
     for (const cb of this.stateListeners) cb(state);
   }
 
-  private unavailable(): never {
-    throw new ProviderUnavailableError(
-      this.id,
-      "Angel One data APIs are not wired up yet (scaffold only).",
-    );
+  // ------------------------------------------------------------- instruments
+
+  async searchInstruments(query: string): Promise<Instrument[]> {
+    const res = await fetch(`/api/angelone/instruments?q=${encodeURIComponent(query)}`);
+    if (!res.ok) return [];
+    const body = (await res.json()) as { instruments?: Instrument[] };
+    return body.instruments ?? [];
   }
 
-  async searchInstruments(): Promise<Instrument[]> {
-    return this.unavailable();
+  async getInstrument(token: string): Promise<Instrument | undefined> {
+    if (token.startsWith("IDX:")) {
+      const def = INDICES.find((i) => i.symbol === token.slice(4));
+      return def ? indexInstrument(def) : undefined;
+    }
+    if (token.startsWith("EQ:")) {
+      const cached = this.equityByToken.get(token);
+      if (cached) return cached;
+      const def = EQUITIES.find((e) => e.symbol === token.slice(3));
+      return def ? equityInstrument(def) : undefined;
+    }
+    if (token.startsWith("OPT:")) {
+      const res = await fetch(`/api/angelone/instruments?optionToken=${encodeURIComponent(token)}`);
+      const body = (await res.json()) as { instrument: Instrument | null };
+      return body.instrument ?? undefined;
+    }
+    return undefined;
   }
-  async getInstrument(): Promise<Instrument | undefined> {
-    return this.unavailable();
-  }
+
+  // ------------------------------------------------------------------ quotes
+
   async getIndices(): Promise<ListedQuote[]> {
-    return this.unavailable();
+    const { quotes } = await fetchQuotes(INDEX_TOKENS);
+    const byToken = new Map(quotes.map((q) => [q.token, q]));
+    return INDEX_INSTRUMENTS.flatMap((instrument) => {
+      const quote = byToken.get(instrument.token);
+      return quote ? [{ instrument, quote }] : [];
+    });
   }
+
   async getMovers(): Promise<Movers> {
-    return this.unavailable();
+    const { quotes } = await fetchQuotes(EQUITY_TOKENS);
+    const byToken = new Map(quotes.map((q) => [q.token, q]));
+    const all: ListedQuote[] = EQUITY_INSTRUMENTS.flatMap((instrument) => {
+      const quote = byToken.get(instrument.token);
+      return quote ? [{ instrument, quote }] : [];
+    });
+    const byChange = [...all].sort((a, b) => b.quote.changePercent - a.quote.changePercent);
+    const byValue = [...all].sort(
+      (a, b) => b.quote.ltp * b.quote.volume - a.quote.ltp * a.quote.volume,
+    );
+    return {
+      gainers: byChange.filter((e) => e.quote.changePercent > 0).slice(0, 8),
+      losers: byChange.filter((e) => e.quote.changePercent < 0).reverse().slice(0, 8),
+      mostActive: byValue.slice(0, 8),
+      advances: all.filter((e) => e.quote.change > 0).length,
+      declines: all.filter((e) => e.quote.change < 0).length,
+      unchanged: all.filter((e) => e.quote.change === 0).length,
+    };
   }
-  async getQuote(): Promise<Quote> {
-    return this.unavailable();
+
+  async getQuote(token: string): Promise<Quote> {
+    const { quotes } = await fetchQuotes([token]);
+    const quote = quotes.find((q) => q.token === token);
+    if (!quote) throw new Error(`No live quote for ${token}`);
+    return quote;
   }
+
+  // ----------------------------------------------------------------- options
+
   async getOptionUnderlyings(): Promise<Instrument[]> {
-    return this.unavailable();
+    return OPTION_UNDERLYING_INSTRUMENTS;
   }
-  async getOptionExpiries(): Promise<string[]> {
-    return this.unavailable();
+
+  async getOptionExpiries(underlyingToken: string): Promise<string[]> {
+    const symbol = underlyingToken.startsWith("IDX:") ? underlyingToken.slice(4) : underlyingToken;
+    const res = await fetch(`/api/angelone/instruments?expiries=${encodeURIComponent(symbol)}`);
+    const body = (await res.json()) as { expiries?: string[] };
+    return body.expiries ?? [];
   }
-  async getOptionChain(): Promise<OptionChain> {
-    return this.unavailable();
+
+  async getOptionChain(underlyingToken: string, expiry: string): Promise<OptionChain> {
+    const { chain } = await postJson<{ chain: OptionChain }>("/api/angelone/option-chain", {
+      underlyingToken,
+      expiry,
+    });
+    return chain;
   }
-  async getCandles(): Promise<Candle[]> {
-    return this.unavailable();
+
+  // ----------------------------------------------------------------- candles
+
+  async getCandles(token: string, timeframe: Timeframe, maxBars = 500): Promise<Candle[]> {
+    const { candles } = await postJson<{ candles: Candle[] }>("/api/angelone/candles", {
+      token,
+      timeframe,
+      maxBars,
+    });
+    return candles;
   }
-  subscribeQuotes(): Unsubscribe {
-    return () => {};
+
+  // --------------------------------------------------------------- streaming
+
+  subscribeQuotes(tokens: string[], cb: (quote: Quote) => void): Unsubscribe {
+    return this.poller.subscribeQuotes(tokens, cb);
   }
-  subscribeDepth(): Unsubscribe {
-    return () => {};
+
+  subscribeDepth(token: string, cb: (depth: MarketDepth) => void): Unsubscribe {
+    return this.poller.subscribeDepth(token, cb);
   }
 }

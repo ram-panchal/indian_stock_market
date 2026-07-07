@@ -3,11 +3,12 @@
 /**
  * Provider selection.
  *
- * Default is the mock simulator. Opt into the Angel One scaffold with
- * NEXT_PUBLIC_DATA_PROVIDER=angelone — if its (server-side) credentials are
- * missing or login fails, we fall back to the simulator and record why, so
- * the UI can show an explicit "running on simulated data" notice instead of
- * crashing or silently pretending.
+ * With NEXT_PUBLIC_DATA_PROVIDER=angelone (the intended default for live data)
+ * the app runs on the real Angel One feed and NEVER falls back to simulated
+ * data: if credentials are missing or login fails, the provider stays in an
+ * error state and the UI shows why (no invented prices). Set the env var to
+ * anything else — or leave it unset — to use the in-browser simulator, which
+ * is always clearly flagged as SIMULATED.
  */
 
 import { MockMarketDataProvider } from "./mock/mock-provider";
@@ -33,23 +34,23 @@ export function getProviderHandle(): ProviderHandle {
   if (handle) return handle;
 
   const wantAngelOne = process.env.NEXT_PUBLIC_DATA_PROVIDER === "angelone";
-  const mock = new MockMarketDataProvider();
 
   if (!wantAngelOne) {
+    const mock = new MockMarketDataProvider();
     handle = { provider: mock, fallbackReason: null, ready: mock.connect() };
     return handle;
   }
 
   const angel = new AngelOneMarketDataProvider();
   const h: ProviderHandle = { provider: angel, fallbackReason: null, ready: Promise.resolve() };
+  // On failure we deliberately do NOT swap in the simulator — the user asked
+  // for live data only. `ready` still resolves so consumers proceed and show
+  // an honest error/empty state; `fallbackReason` explains what to fix.
   h.ready = angel.connect().catch((err: unknown) => {
-    const reason =
+    h.fallbackReason =
       err instanceof ProviderUnavailableError
         ? err.message
         : "Angel One connection failed unexpectedly.";
-    h.provider = mock;
-    h.fallbackReason = reason;
-    return mock.connect();
   });
   handle = h;
   return handle;
