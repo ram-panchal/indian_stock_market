@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+/*
+ * Trading-terminal design tokens.
+ * Dark is the default theme; html[data-theme="light"] overrides.
+ * Up/down colors follow Indian market convention: green = up, red = down.
+ */
+:root {
+  --bg: #0a0e14;
+  --surface: #10151d;
+  --surface-2: #161d28;
+  --surface-3: #1c2432;
+  --border: #1f2733;
+  --border-strong: #2c3646;
+  --ink: #e6ebf2;
+  --ink-2: #9aa7b8;
+  --ink-3: #647080;
+  --accent: #4f8ef7;
+  --accent-muted: rgba(79, 142, 247, 0.14);
+  --up: #12a984;
+  --up-muted: rgba(18, 169, 132, 0.13);
+  --down: #f23645;
+  --down-muted: rgba(242, 54, 69, 0.12);
+  --warn: #e5a50f;
+  --warn-muted: rgba(229, 165, 15, 0.14);
+}
+
+html[data-theme="light"] {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #f0f3f7;
+  --surface-3: #e7ecf2;
+  --border: #dde3eb;
+  --border-strong: #c4cdd9;
+  --ink: #1a2230;
+  --ink-2: #4d5a6c;
+  --ink-3: #8794a5;
+  --accent: #2563eb;
+  --accent-muted: rgba(37, 99, 235, 0.1);
+  --up: #089981;
+  --up-muted: rgba(8, 153, 129, 0.1);
+  --down: #e13443;
+  --down-muted: rgba(225, 52, 67, 0.09);
+  --warn: #b7791f;
+  --warn-muted: rgba(183, 121, 31, 0.12);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-muted: var(--accent-muted);
+  --color-up: var(--up);
+  --color-up-muted: var(--up-muted);
+  --color-down: var(--down);
+  --color-down-muted: var(--down-muted);
+  --color-warn: var(--warn);
+  --color-warn-muted: var(--warn-muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Prices and quantities align in columns everywhere. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono), var(--font-sans), monospace;
+}
+
+/* Tick flash animations for live quote cells. */
+@keyframes flash-up {
+  0% { background-color: var(--up-muted); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-down {
+  0% { background-color: var(--down-muted); }
+  100% { background-color: transparent; }
+}
+.flash-up {
+  animation: flash-up 0.7s ease-out;
+}
+.flash-down {
+  animation: flash-down 0.7s ease-out;
+}
+
+/* Thin scrollbars for dense panels. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
