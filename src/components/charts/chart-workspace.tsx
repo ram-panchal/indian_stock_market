@@ -23,6 +23,8 @@ import { LightweightChartEngine } from "@/lib/chart/lightweight-engine";
 import { useTheme } from "@/components/theme/theme-provider";
 import { useTradeTicket } from "@/components/trading/trade-ticket";
 import { ChangeCell, LtpCell } from "@/components/market/price-cells";
+import { SymbolChip } from "@/components/ui/symbol-chip";
+import { DepthTable } from "@/components/market/depth-table";
 
 const TIMEFRAMES: { value: Timeframe; label: string }[] = [
   { value: "1m", label: "1m" },
@@ -63,6 +65,10 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [hovered, setHovered] = useState<Candle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Loading" is derived: the chart has finished loading once the token+timeframe
+  // it last rendered matches the current selection (no setState-in-effect).
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== `${token}|${timeframe}`;
 
   const { theme } = useTheme();
   const ticket = useTradeTicket();
@@ -122,10 +128,12 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
         if (cancelled || !engineRef.current) return;
         engineRef.current.setCandles(candles, timeframe, token, fit);
         lastBarRef.current = candles[candles.length - 1] ?? null;
-        setError(null);
+        setError(candles.length === 0 ? "No candles returned for this symbol/timeframe." : null);
       } catch (err) {
         if (!cancelled)
           setError(err instanceof Error ? err.message : "Failed to load candles");
+      } finally {
+        if (!cancelled) setLoadedKey(`${token}|${timeframe}`);
       }
     };
     load(true);
@@ -316,7 +324,24 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
         </p>
       ) : null}
 
-      <div ref={containerRef} className="relative min-h-0 flex-1" />
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div ref={containerRef} className="absolute inset-0" />
+          {loading ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-ink-3">
+              Loading chart…
+            </div>
+          ) : null}
+        </div>
+        {instrument && instrument.segment !== "INDEX" ? (
+          <aside className="hidden w-64 shrink-0 overflow-y-auto border-l border-border bg-surface p-3 lg:block">
+            <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-ink-2 uppercase">
+              Order book
+            </h3>
+            <DepthTable token={token} />
+          </aside>
+        ) : null}
+      </div>
 
       <p className="border-t border-border bg-surface px-3 py-1 text-[9px] text-ink-3">
         Rendered with TradingView&nbsp;lightweight-charts (open source). Times
@@ -371,8 +396,9 @@ function SymbolPicker({
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-surface-3"
+        className="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-2 py-1 text-xs font-semibold text-ink hover:bg-surface-3"
       >
+        {current ? <SymbolChip label={current.symbol} round /> : null}
         {current?.symbol ?? "Select"}
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.2">
           <path d="M1 3l3 3 3-3" />
@@ -401,9 +427,13 @@ function SymbolPicker({
                     onSelect(inst);
                     setOpen(false);
                   }}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-3"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-3"
                 >
-                  <span className="font-medium text-ink">{inst.symbol}</span>
+                  <SymbolChip label={inst.symbol} round />
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium text-ink">{inst.symbol}</span>
+                    <span className="ml-1 truncate text-[10px] text-ink-3">{inst.name}</span>
+                  </span>
                   <span className="text-[10px] text-ink-3">{inst.segment}</span>
                 </button>
               ))}

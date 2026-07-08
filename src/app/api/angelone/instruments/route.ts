@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 import {
+  getEquityInstrument,
   getExpiries,
   getOptionInstrument,
   searchUniverse,
@@ -18,7 +19,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   try {
     const q = searchParams.get("q");
-    if (q !== null) return NextResponse.json({ instruments: searchUniverse(q) });
+    if (q !== null) return NextResponse.json({ instruments: await searchUniverse(q) });
 
     const expiriesFor = searchParams.get("expiries");
     if (expiriesFor) return NextResponse.json({ expiries: await getExpiries(expiriesFor) });
@@ -26,6 +27,10 @@ export async function GET(req: Request): Promise<NextResponse> {
     const optionToken = searchParams.get("optionToken");
     if (optionToken)
       return NextResponse.json({ instrument: (await getOptionInstrument(optionToken)) ?? null });
+
+    const equityToken = searchParams.get("equityToken");
+    if (equityToken)
+      return NextResponse.json({ instrument: (await getEquityInstrument(equityToken)) ?? null });
 
     return NextResponse.json({ ok: false, reason: "Unknown query." }, { status: 400 });
   } catch (err) {

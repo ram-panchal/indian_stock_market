@@ -9,6 +9,7 @@ import { unrealizedPnl } from "@/lib/trading/derive";
 import { getPaperTradingEngine } from "@/lib/trading/engine";
 import { useToast } from "@/components/ui/toast";
 import { LtpCell, PnlText } from "@/components/market/price-cells";
+import { SymbolChip } from "@/components/ui/symbol-chip";
 
 export function PositionsTable({
   positions,
@@ -91,10 +92,14 @@ const PositionRow = memo(function PositionRow({
   return (
     <tr className="border-b border-border/50 hover:bg-surface-2">
       <td className="px-3 py-2">
-        <Link href={`/charts?token=${encodeURIComponent(inst.token)}`}>
+        <Link
+          href={`/charts?token=${encodeURIComponent(inst.token)}`}
+          className="flex items-center gap-2"
+        >
+          <SymbolChip label={inst.symbol} round />
           <span className="font-medium text-ink">{inst.symbol}</span>
           <span
-            className={`ml-2 rounded px-1 py-0.5 text-[9px] ${
+            className={`rounded px-1 py-0.5 text-[9px] ${
               position.netQty >= 0 ? "bg-up-muted text-up" : "bg-down-muted text-down"
             }`}
           >

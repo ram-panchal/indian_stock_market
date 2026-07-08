@@ -26,7 +26,10 @@ import { Segmented } from "@/components/ui/segmented";
 import { useTradeTicket } from "@/components/trading/trade-ticket";
 
 type StrikeWindow = 5 | 10 | 20;
-type SideMode = "prices" | "greeks";
+type SideMode = "compact" | "prices" | "greeks";
+
+/** Columns per side for each mode (drives header colSpan + placeholder cells). */
+const MODE_COLS: Record<SideMode, number> = { compact: 3, prices: 7, greeks: 5 };
 
 export function OptionChainView() {
   const [underlyings, setUnderlyings] = useState<Instrument[]>([]);
@@ -34,7 +37,7 @@ export function OptionChainView() {
   const [expiries, setExpiries] = useState<string[]>([]);
   const [expiry, setExpiry] = useState<string | null>(null);
   const [window_, setWindow] = useState<StrikeWindow>(10);
-  const [mode, setMode] = useState<SideMode>("prices");
+  const [mode, setMode] = useState<SideMode>("compact");
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +134,8 @@ export function OptionChainView() {
         />
         <Segmented
           options={[
-            { value: "prices", label: "Prices" },
+            { value: "compact", label: "Compact" },
+            { value: "prices", label: "Detailed" },
             { value: "greeks", label: "Greeks" },
           ]}
           value={mode}
@@ -166,18 +170,24 @@ export function OptionChainView() {
         <table className="w-full min-w-[980px] text-[11px]">
           <thead className="sticky top-0 z-10 bg-surface-2">
             <tr className="text-ink-3">
-              <th colSpan={mode === "prices" ? 7 : 5} className="border-b border-border py-1.5 text-center font-medium text-up">
+              <th colSpan={MODE_COLS[mode]} className="border-b border-border py-1.5 text-center font-medium text-up">
                 CALLS
               </th>
               <th className="border-b border-border py-1.5 text-center font-semibold text-ink-2">
                 Strike
               </th>
-              <th colSpan={mode === "prices" ? 7 : 5} className="border-b border-border py-1.5 text-center font-medium text-down">
+              <th colSpan={MODE_COLS[mode]} className="border-b border-border py-1.5 text-center font-medium text-down">
                 PUTS
               </th>
             </tr>
             <tr className="border-b border-border text-[10px] text-ink-3">
-              {mode === "prices" ? (
+              {mode === "compact" ? (
+                <>
+                  <Th right>OI</Th>
+                  <Th right>IV</Th>
+                  <Th right>LTP</Th>
+                </>
+              ) : mode === "prices" ? (
                 <>
                   <Th right>OI</Th>
                   <Th right>OI Chg</Th>
@@ -197,7 +207,13 @@ export function OptionChainView() {
                 </>
               )}
               <Th center>—</Th>
-              {mode === "prices" ? (
+              {mode === "compact" ? (
+                <>
+                  <Th right>LTP</Th>
+                  <Th right>IV</Th>
+                  <Th right>OI</Th>
+                </>
+              ) : mode === "prices" ? (
                 <>
                   <Th right>LTP</Th>
                   <Th right>Bid</Th>
@@ -334,8 +350,15 @@ const ChainRow = memo(
         className={`border-b border-border/50 hover:bg-surface-2 ${isAtm ? "bg-accent-muted" : ""}`}
       >
         <SideCells option={row.ce} itm={row.strike < spot} mode={mode} maxOI={maxOI} side="ce" />
-        <td className="tnum bg-surface-2/60 px-2 py-1 text-center font-semibold text-ink">
+        <td
+          className={`tnum px-2 py-1 text-center font-semibold text-ink ${isAtm ? "bg-accent/20" : "bg-surface-2/60"}`}
+        >
           {formatPrice(row.strike, 0)}
+          {isAtm ? (
+            <span className="ml-1 rounded bg-accent px-1 py-0.5 text-[8px] font-bold text-white align-middle">
+              ATM
+            </span>
+          ) : null}
         </td>
         <SideCells option={row.pe} itm={row.strike > spot} mode={mode} maxOI={maxOI} side="pe" />
       </tr>
@@ -365,7 +388,7 @@ function SideCells({
   side: "ce" | "pe";
 }) {
   const ticket = useTradeTicket();
-  const cols = mode === "prices" ? 7 : 5;
+  const cols = MODE_COLS[mode];
   if (!option) {
     return (
       <>
@@ -397,8 +420,25 @@ function SideCells({
     </td>
   );
 
+  const oiCell = (
+    <td key="oi" className={`relative px-2 py-1 text-right ${tint}`}>
+      <span
+        className={`absolute inset-y-0.5 ${side === "ce" ? "right-0 bg-up-muted" : "right-0 bg-down-muted"}`}
+        style={{ width: `${oiPct}%` }}
+      />
+      <span className="tnum relative text-ink-2">{formatCompact(option.oi)}</span>
+    </td>
+  );
+  const ivCell = (
+    <td key="iv" className={`tnum px-2 py-1 text-right text-ink-2 ${tint}`}>
+      {option.iv.toFixed(1)}
+    </td>
+  );
+
   const cells =
-    mode === "prices"
+    mode === "compact"
+      ? [oiCell, ivCell, ltpCell]
+      : mode === "prices"
       ? [
           <td key="oi" className={`relative px-2 py-1 text-right ${tint}`}>
             <span

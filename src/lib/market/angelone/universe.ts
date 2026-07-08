@@ -41,51 +41,58 @@ export const INDICES: IndexDef[] = [
 export interface EquityDef {
   symbol: string;
   name: string;
+  /** Pinned Angel NSE symboltoken for the `<symbol>-EQ` scrip. Lets the curated
+   *  dashboard/watchlist/movers set resolve WITHOUT waiting on the multi-MB
+   *  scrip master (the master is still used for every other NSE stock). */
+  angelToken: string;
 }
 
-/** NSE cash symbols; Angel token resolved from master as `<symbol>-EQ`. */
+/** NSE cash symbols with pinned Angel symboltokens (verified from the master). */
 export const EQUITIES: EquityDef[] = [
-  { symbol: "RELIANCE", name: "Reliance Industries" },
-  { symbol: "HDFCBANK", name: "HDFC Bank" },
-  { symbol: "ICICIBANK", name: "ICICI Bank" },
-  { symbol: "INFY", name: "Infosys" },
-  { symbol: "TCS", name: "Tata Consultancy Services" },
-  { symbol: "SBIN", name: "State Bank of India" },
-  { symbol: "BHARTIARTL", name: "Bharti Airtel" },
-  { symbol: "ITC", name: "ITC" },
-  { symbol: "LT", name: "Larsen & Toubro" },
-  { symbol: "KOTAKBANK", name: "Kotak Mahindra Bank" },
-  { symbol: "AXISBANK", name: "Axis Bank" },
-  { symbol: "HINDUNILVR", name: "Hindustan Unilever" },
-  { symbol: "BAJFINANCE", name: "Bajaj Finance" },
-  { symbol: "MARUTI", name: "Maruti Suzuki India" },
-  { symbol: "M&M", name: "Mahindra & Mahindra" },
-  { symbol: "SUNPHARMA", name: "Sun Pharmaceutical" },
-  { symbol: "TITAN", name: "Titan Company" },
-  { symbol: "ULTRACEMCO", name: "UltraTech Cement" },
-  { symbol: "ASIANPAINT", name: "Asian Paints" },
-  { symbol: "NTPC", name: "NTPC" },
-  { symbol: "POWERGRID", name: "Power Grid Corporation" },
-  { symbol: "TMPV", name: "Tata Motors Passenger Vehicles" },
-  { symbol: "TATASTEEL", name: "Tata Steel" },
-  { symbol: "JSWSTEEL", name: "JSW Steel" },
-  { symbol: "WIPRO", name: "Wipro" },
-  { symbol: "HCLTECH", name: "HCL Technologies" },
-  { symbol: "TECHM", name: "Tech Mahindra" },
-  { symbol: "ADANIENT", name: "Adani Enterprises" },
-  { symbol: "ADANIPORTS", name: "Adani Ports & SEZ" },
-  { symbol: "COALINDIA", name: "Coal India" },
-  { symbol: "ONGC", name: "Oil & Natural Gas Corp" },
-  { symbol: "GRASIM", name: "Grasim Industries" },
-  { symbol: "BAJAJFINSV", name: "Bajaj Finserv" },
-  { symbol: "NESTLEIND", name: "Nestle India" },
-  { symbol: "DRREDDY", name: "Dr. Reddy's Laboratories" },
-  { symbol: "CIPLA", name: "Cipla" },
-  { symbol: "EICHERMOT", name: "Eicher Motors" },
-  { symbol: "HEROMOTOCO", name: "Hero MotoCorp" },
-  { symbol: "INDUSINDBK", name: "IndusInd Bank" },
-  { symbol: "SHRIRAMFIN", name: "Shriram Finance" },
+  { symbol: "RELIANCE", name: "Reliance Industries", angelToken: "2885" },
+  { symbol: "HDFCBANK", name: "HDFC Bank", angelToken: "1333" },
+  { symbol: "ICICIBANK", name: "ICICI Bank", angelToken: "4963" },
+  { symbol: "INFY", name: "Infosys", angelToken: "1594" },
+  { symbol: "TCS", name: "Tata Consultancy Services", angelToken: "11536" },
+  { symbol: "SBIN", name: "State Bank of India", angelToken: "3045" },
+  { symbol: "BHARTIARTL", name: "Bharti Airtel", angelToken: "10604" },
+  { symbol: "ITC", name: "ITC", angelToken: "1660" },
+  { symbol: "LT", name: "Larsen & Toubro", angelToken: "11483" },
+  { symbol: "KOTAKBANK", name: "Kotak Mahindra Bank", angelToken: "1922" },
+  { symbol: "AXISBANK", name: "Axis Bank", angelToken: "5900" },
+  { symbol: "HINDUNILVR", name: "Hindustan Unilever", angelToken: "1394" },
+  { symbol: "BAJFINANCE", name: "Bajaj Finance", angelToken: "317" },
+  { symbol: "MARUTI", name: "Maruti Suzuki India", angelToken: "10999" },
+  { symbol: "M&M", name: "Mahindra & Mahindra", angelToken: "2031" },
+  { symbol: "SUNPHARMA", name: "Sun Pharmaceutical", angelToken: "3351" },
+  { symbol: "TITAN", name: "Titan Company", angelToken: "3506" },
+  { symbol: "ULTRACEMCO", name: "UltraTech Cement", angelToken: "11532" },
+  { symbol: "ASIANPAINT", name: "Asian Paints", angelToken: "236" },
+  { symbol: "NTPC", name: "NTPC", angelToken: "11630" },
+  { symbol: "POWERGRID", name: "Power Grid Corporation", angelToken: "14977" },
+  { symbol: "TMPV", name: "Tata Motors Passenger Vehicles", angelToken: "3456" },
+  { symbol: "TATASTEEL", name: "Tata Steel", angelToken: "3499" },
+  { symbol: "JSWSTEEL", name: "JSW Steel", angelToken: "11723" },
+  { symbol: "WIPRO", name: "Wipro", angelToken: "3787" },
+  { symbol: "HCLTECH", name: "HCL Technologies", angelToken: "7229" },
+  { symbol: "TECHM", name: "Tech Mahindra", angelToken: "13538" },
+  { symbol: "ADANIENT", name: "Adani Enterprises", angelToken: "25" },
+  { symbol: "ADANIPORTS", name: "Adani Ports & SEZ", angelToken: "15083" },
+  { symbol: "COALINDIA", name: "Coal India", angelToken: "20374" },
+  { symbol: "ONGC", name: "Oil & Natural Gas Corp", angelToken: "2475" },
+  { symbol: "GRASIM", name: "Grasim Industries", angelToken: "1232" },
+  { symbol: "BAJAJFINSV", name: "Bajaj Finserv", angelToken: "16675" },
+  { symbol: "NESTLEIND", name: "Nestle India", angelToken: "17963" },
+  { symbol: "DRREDDY", name: "Dr. Reddy's Laboratories", angelToken: "881" },
+  { symbol: "CIPLA", name: "Cipla", angelToken: "694" },
+  { symbol: "EICHERMOT", name: "Eicher Motors", angelToken: "910" },
+  { symbol: "HEROMOTOCO", name: "Hero MotoCorp", angelToken: "1348" },
+  { symbol: "INDUSINDBK", name: "IndusInd Bank", angelToken: "5258" },
+  { symbol: "SHRIRAMFIN", name: "Shriram Finance", angelToken: "4306" },
 ];
+
+/** symbol -> pinned Angel symboltoken for the curated equities. */
+export const EQUITY_ANGEL_TOKENS = new Map(EQUITIES.map((e) => [e.symbol, e.angelToken]));
 
 export interface OptionUnderlyingDef {
   /** Our underlying symbol AND the Angel option `name` field (they match). */

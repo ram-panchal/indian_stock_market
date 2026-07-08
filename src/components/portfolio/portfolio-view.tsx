@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { usePaperState } from "@/lib/hooks/use-paper-trading";
 import { useQuotes } from "@/lib/hooks/use-quotes";
-import { computePositions, unrealizedPnl } from "@/lib/trading/derive";
+import { computeCash, computePositions, unrealizedPnl } from "@/lib/trading/derive";
+import { formatINR } from "@/lib/market/format";
 import { FundsCard } from "./funds-card";
 import { PositionsTable } from "./positions-table";
 import { OrdersTable, TradesTable } from "./orders-table";
@@ -46,22 +47,60 @@ export function PortfolioView() {
   const totalRealized = positions.reduce((sum, p) => sum + p.realizedPnl, 0);
   const openOrderCount = state.orders.filter((o) => o.status === "OPEN").length;
 
+  // Cost basis of open positions, current market value, and day's P&L.
+  const invested = openPositions.reduce(
+    (sum, p) => sum + p.avgPrice * Math.abs(p.netQty),
+    0,
+  );
+  const dayPnl = openPositions.reduce((sum, p) => {
+    const q = quotes.get(p.instrument.token);
+    if (!q) return sum;
+    return sum + (q.ltp - q.prevClose) * p.netQty;
+  }, 0);
+  const cash = computeCash(state);
+  const marketValue = openPositions.reduce((sum, p) => {
+    const q = quotes.get(p.instrument.token);
+    return sum + (q ? q.ltp * p.netQty : p.avgPrice * p.netQty);
+  }, 0);
+  const portfolioValue = cash + marketValue;
+  const totalPnl = totalRealized + totalUnrealized;
+  const returnPct =
+    state.startingBalance > 0 ? (totalPnl / state.startingBalance) * 100 : 0;
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 p-3 sm:p-4">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <FundsCard />
-        <SummaryCard
-          title="Unrealized P&L"
-          hint={`${openPositions.length} open position${openPositions.length === 1 ? "" : "s"}`}
-        >
-          <PnlText value={totalUnrealized} className="text-xl font-semibold" />
-        </SummaryCard>
-        <SummaryCard
-          title="Realized P&L"
-          hint={`${state.trades.length} trades · ${openOrderCount} open order${openOrderCount === 1 ? "" : "s"}`}
-        >
-          <PnlText value={totalRealized} className="text-xl font-semibold" />
-        </SummaryCard>
+        <section className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+          <StatTile title="Portfolio value" hint="cash + holdings">
+            <span className="tnum text-xl font-semibold text-ink">
+              {formatINR(portfolioValue)}
+            </span>
+          </StatTile>
+          <StatTile title="Total P&L" hint={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}% return`}>
+            <PnlText value={totalPnl} className="text-xl font-semibold" />
+          </StatTile>
+          <StatTile title="Day's P&L" hint="vs prev close">
+            <PnlText value={dayPnl} className="text-xl font-semibold" />
+          </StatTile>
+          <StatTile title="Invested" hint={`${openPositions.length} open`}>
+            <span className="tnum text-base font-semibold text-ink">
+              {formatINR(invested)}
+            </span>
+          </StatTile>
+          <StatTile
+            title="Unrealized"
+            hint={`${openPositions.length} position${openPositions.length === 1 ? "" : "s"}`}
+          >
+            <PnlText value={totalUnrealized} className="text-base font-semibold" />
+          </StatTile>
+          <StatTile
+            title="Realized"
+            hint={`${state.trades.length} trades · ${openOrderCount} open`}
+          >
+            <PnlText value={totalRealized} className="text-base font-semibold" />
+          </StatTile>
+        </section>
       </div>
 
       <section className="rounded-lg border border-border bg-surface">
@@ -98,7 +137,7 @@ export function PortfolioView() {
   );
 }
 
-function SummaryCard({
+function StatTile({
   title,
   hint,
   children,
@@ -108,12 +147,12 @@ function SummaryCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border bg-surface p-3">
-      <h3 className="text-xs font-semibold tracking-wide text-ink-2 uppercase">
+    <div className="bg-surface p-3">
+      <h3 className="text-[10px] font-semibold tracking-wide text-ink-3 uppercase">
         {title}
       </h3>
-      <p className="mt-2">{children}</p>
-      <p className="mt-1 text-[10px] text-ink-3">{hint}</p>
-    </section>
+      <p className="mt-1.5">{children}</p>
+      <p className="mt-0.5 text-[10px] text-ink-3">{hint}</p>
+    </div>
   );
 }

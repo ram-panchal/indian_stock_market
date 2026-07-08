@@ -14,6 +14,14 @@ import {
 } from "@/lib/stores/watchlist-store";
 import { useTradeTicket } from "@/components/trading/trade-ticket";
 import { ChangeCell, LtpCell } from "@/components/market/price-cells";
+import { SymbolChip } from "@/components/ui/symbol-chip";
+import { INDEX_INSTRUMENTS, EQUITY_INSTRUMENTS } from "@/lib/market/angelone/universe";
+
+const POPULAR: Instrument[] = [
+  INDEX_INSTRUMENTS[0],
+  INDEX_INSTRUMENTS[1],
+  ...EQUITY_INSTRUMENTS.slice(0, 6),
+].filter(Boolean);
 
 export function SearchPalette({
   open,
@@ -128,10 +136,31 @@ export function SearchPalette({
             </p>
           ) : null}
           {!query ? (
-            <p className="px-4 py-6 text-center text-xs text-ink-3">
-              Type to search — Enter opens the chart. Index options live on the
-              Options page.
-            </p>
+            <div className="py-1">
+              <p className="px-4 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-ink-3 uppercase">
+                Popular
+              </p>
+              {POPULAR.map((inst) => (
+                <button
+                  key={inst.token}
+                  onClick={() => openChart(inst)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-2"
+                >
+                  <SymbolChip label={inst.symbol} size="md" round />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-ink">{inst.symbol}</p>
+                    <p className="truncate text-[11px] text-ink-3">{inst.name}</p>
+                  </div>
+                  <div className="text-right text-xs">
+                    <LtpCell token={inst.token} className="block text-ink" />
+                    <ChangeCell token={inst.token} className="text-[11px]" />
+                  </div>
+                </button>
+              ))}
+              <p className="px-4 pt-2 pb-2 text-center text-[10px] text-ink-3">
+                Search any NSE stock or index — Enter opens the chart.
+              </p>
+            </div>
           ) : null}
           {results.map((inst, i) => {
             const watched = isWatched(watchlist, inst.token);
@@ -142,6 +171,7 @@ export function SearchPalette({
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => openChart(inst)}
               >
+                <SymbolChip label={inst.symbol} size="md" round />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">
                     {inst.symbol}

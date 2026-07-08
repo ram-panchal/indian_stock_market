@@ -142,7 +142,12 @@ export class AngelOneMarketDataProvider implements MarketDataProvider {
       const cached = this.equityByToken.get(token);
       if (cached) return cached;
       const def = EQUITIES.find((e) => e.symbol === token.slice(3));
-      return def ? equityInstrument(def) : undefined;
+      if (def) return equityInstrument(def);
+      // Non-curated NSE stock: resolve real name/lot/tick from the master.
+      const res = await fetch(`/api/angelone/instruments?equityToken=${encodeURIComponent(token)}`);
+      if (!res.ok) return undefined;
+      const body = (await res.json()) as { instrument: Instrument | null };
+      return body.instrument ?? undefined;
     }
     if (token.startsWith("OPT:")) {
       const res = await fetch(`/api/angelone/instruments?optionToken=${encodeURIComponent(token)}`);

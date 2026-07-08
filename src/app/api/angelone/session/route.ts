@@ -23,8 +23,13 @@ import {
 export async function POST(): Promise<NextResponse> {
   try {
     await getAngelSession();
-    // Warm the instrument master so the first quote/chain call is fast.
-    await getMaster();
+    // Warm the instrument master in the BACKGROUND so it's ready by the time
+    // the first search/quote/chain call needs it — but don't block the session
+    // response on the multi-MB scrip-master fetch+parse (that added ~3.5s to
+    // cold start, stalling the whole UI which gates on this endpoint).
+    void getMaster().catch(() => {
+      // A warm-up failure is non-fatal: getMaster() retries on first real use.
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof AngelCredsError) {

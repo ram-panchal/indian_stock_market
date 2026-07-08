@@ -10,6 +10,7 @@
 import type { Exchange, Instrument, OptionType } from "../types";
 import {
   EQUITIES,
+  EQUITY_ANGEL_TOKENS,
   IDX,
   INDICES,
   OPTION_UNDERLYINGS,
@@ -140,11 +141,15 @@ export async function resolveToken(ourToken: string): Promise<AngelRef | undefin
     const idx = INDICES.find((i) => i.symbol === sym);
     return idx ? { exchange: "NSE", symboltoken: idx.angelToken } : undefined;
   }
-  const master = await getMaster();
   if (ourToken.startsWith("EQ:")) {
-    const row = master.eqBySymbol.get(ourToken.slice(3));
+    // Curated equities have pinned tokens — resolve without the master so the
+    // dashboard/movers/watchlist never block on the multi-MB build.
+    const pinned = EQUITY_ANGEL_TOKENS.get(ourToken.slice(3));
+    if (pinned) return { exchange: "NSE", symboltoken: pinned };
+    const row = (await getMaster()).eqBySymbol.get(ourToken.slice(3));
     return row ? { exchange: "NSE", symboltoken: row.token } : undefined;
   }
+  const master = await getMaster();
   if (ourToken.startsWith("OPT:")) {
     const leg = findOptionLeg(master, ourToken);
     return leg ? { exchange: "NFO", symboltoken: leg.row.token } : undefined;
@@ -280,53 +285,98 @@ export async function getOptionInstrument(ourToken: string): Promise<Instrument 
   return optionInstrument(leg, parsed.underlyingSymbol, underlyingName, parsed.expiryIso);
 }
 
+// ---------------------------------------------------------------- equity build
+
+/** Friendly company names for the curated liquid set (master only carries the
+ *  ticker in its `name` field, so we overlay these when we have them). */
+const CURATED_NAMES = new Map(EQUITIES.map((e) => [e.symbol, e.name]));
+
+/** Build our Instrument for an NSE equity from a scrip-master row. */
+function equityInstrumentFromRow(symbol: string, row: ScripRow): Instrument {
+  return {
+    token: `EQ:${symbol}`,
+    symbol,
+    name: CURATED_NAMES.get(symbol) ?? row.name ?? symbol,
+    exchange: "NSE",
+    segment: "EQUITY",
+    lotSize: Number(row.lotsize) || 1,
+    tickSize: Number(row.tick_size) / 100 || 0.05,
+  };
+}
+
+/** Resolve an `EQ:<SYMBOL>` token to an Instrument using the full master. */
+export async function getEquityInstrument(ourToken: string): Promise<Instrument | undefined> {
+  if (!ourToken.startsWith("EQ:")) return undefined;
+  const symbol = ourToken.slice(3);
+  const master = await getMaster();
+  const row = master.eqBySymbol.get(symbol);
+  return row ? equityInstrumentFromRow(symbol, row) : undefined;
+}
+
 // -------------------------------------------------------------------- search
 
-/** Search curated indices + equities by symbol/name (options excluded). */
-export function searchUniverse(query: string): Instrument[] {
+const INDEX_INSTS: Instrument[] = INDICES.map((i) => ({
+  token: IDX(i.symbol),
+  symbol: i.symbol,
+  name: i.name,
+  exchange: "NSE" as Exchange,
+  segment: "INDEX" as const,
+  lotSize: 1,
+  tickSize: 0.05,
+}));
+
+/**
+ * Search ALL NSE equities (from the master) + every index by symbol/name.
+ * Options are excluded (they live on the Options page). Async because it needs
+ * the master; the caller awaits it.
+ */
+export async function searchUniverse(query: string): Promise<Instrument[]> {
   const q = query.trim().toUpperCase();
   if (!q) return [];
-  const pool: { inst: Instrument; sym: string; name: string }[] = [
-    ...INDICES.map((i) => ({
-      inst: {
-        token: IDX(i.symbol),
-        symbol: i.symbol,
-        name: i.name,
-        exchange: "NSE" as Exchange,
-        segment: "INDEX" as const,
-        lotSize: 1,
-        tickSize: 0.05,
-      },
-      sym: i.symbol,
-      name: i.name,
-    })),
-    ...EQUITIES.map((e) => ({
-      inst: {
-        token: `EQ:${e.symbol}`,
-        symbol: e.symbol,
-        name: e.name,
-        exchange: "NSE" as Exchange,
-        segment: "EQUITY" as const,
-        lotSize: 1,
-        tickSize: 0.05,
-      },
-      sym: e.symbol,
-      name: e.name,
-    })),
-  ];
-  const scored = pool
-    .map(({ inst, sym, name }) => {
-      const s = sym.toUpperCase();
-      const n = name.toUpperCase();
-      let score = -1;
-      if (s === q) score = 100;
-      else if (s.startsWith(q)) score = 80;
-      else if (n.startsWith(q)) score = 60;
-      else if (s.includes(q)) score = 40;
-      else if (n.includes(q)) score = 20;
-      return { inst, score };
-    })
-    .filter((r) => r.score >= 0)
-    .sort((a, b) => b.score - a.score || a.inst.symbol.localeCompare(b.inst.symbol));
-  return scored.slice(0, 12).map((r) => r.inst);
+
+  const scored: { inst: Instrument; score: number }[] = [];
+  const score = (sym: string, name: string): number => {
+    const s = sym.toUpperCase();
+    const n = name.toUpperCase();
+    if (s === q) return 100;
+    if (s.startsWith(q)) return 80;
+    if (n.startsWith(q)) return 60;
+    if (s.includes(q)) return 40;
+    if (n.includes(q)) return 20;
+    return -1;
+  };
+
+  for (const inst of INDEX_INSTS) {
+    const sc = score(inst.symbol, inst.name);
+    if (sc >= 0) scored.push({ inst, score: sc });
+  }
+
+  const master = await getMaster().catch(() => null);
+  if (master) {
+    for (const [symbol, row] of master.eqBySymbol) {
+      const sc = score(symbol, row.name || symbol);
+      if (sc >= 0) scored.push({ inst: equityInstrumentFromRow(symbol, row), score: sc });
+    }
+  } else {
+    // Master unavailable — fall back to the curated equities so search still works.
+    for (const e of EQUITIES) {
+      const sc = score(e.symbol, e.name);
+      if (sc >= 0)
+        scored.push({
+          inst: {
+            token: `EQ:${e.symbol}`,
+            symbol: e.symbol,
+            name: e.name,
+            exchange: "NSE",
+            segment: "EQUITY",
+            lotSize: 1,
+            tickSize: 0.05,
+          },
+          score: sc,
+        });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score || a.inst.symbol.localeCompare(b.inst.symbol));
+  return scored.slice(0, 30).map((r) => r.inst);
 }

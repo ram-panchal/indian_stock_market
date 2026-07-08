@@ -11,6 +11,7 @@ import {
 import { useTradeTicket } from "@/components/trading/trade-ticket";
 import { ChangeCell, LtpCell } from "@/components/market/price-cells";
 import { DepthTable } from "@/components/market/depth-table";
+import { SymbolChip } from "@/components/ui/symbol-chip";
 
 export function WatchlistPanel({
   onSearch,
@@ -81,6 +82,7 @@ const WatchlistRow = memo(function WatchlistRow({
         className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-surface-2"
         onClick={onToggle}
       >
+        <SymbolChip label={inst.symbol} round />
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-ink">{inst.symbol}</p>
           <p className="truncate text-[10px] text-ink-3">{inst.name}</p>

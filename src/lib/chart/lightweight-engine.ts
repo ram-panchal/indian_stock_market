@@ -38,6 +38,7 @@ export class LightweightChartEngine implements ChartEngine {
   private volumeSeries: ISeriesApi<"Histogram"> | null = null;
   private indicatorSeries = new Map<string, AnySeries>();
   private drawingLayer: DrawingLayer | null = null;
+  private resizeObserver: ResizeObserver | null = null;
 
   private candles: Candle[] = [];
   private timeframe: Timeframe = "5m";
@@ -52,8 +53,15 @@ export class LightweightChartEngine implements ChartEngine {
 
   mount(container: HTMLElement): void {
     const t = this.theme;
+    // Explicit sizing instead of `autoSize`: inside a flex/absolute layout the
+    // library's internal ResizeObserver can latch onto a 0-height box at mount
+    // and never recover (chart collapses to just its time axis). We seed the
+    // real size immediately and keep it in sync ourselves.
+    const initialWidth = container.clientWidth || 600;
+    const initialHeight = container.clientHeight || 400;
     this.chart = createChart(container, {
-      autoSize: true,
+      width: initialWidth,
+      height: initialHeight,
       layout: {
         background: { color: "transparent" },
         textColor: t.text,
@@ -121,9 +129,22 @@ export class LightweightChartEngine implements ChartEngine {
       this.theme,
     );
     this.drawingLayer.onToolDone(() => this.toolDoneCb?.());
+
+    // Keep the chart sized to its container. observe() fires immediately with
+    // the current box, so a 0-height mount self-corrects as soon as flex layout
+    // resolves.
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry || !this.chart) return;
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) this.chart.resize(width, height);
+    });
+    this.resizeObserver.observe(container);
   }
 
   destroy(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.drawingLayer?.destroy();
     this.drawingLayer = null;
     this.chart?.remove();
