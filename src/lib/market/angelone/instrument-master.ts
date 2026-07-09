@@ -333,18 +333,32 @@ const INDEX_INSTS: Instrument[] = INDICES.map((i) => ({
 export async function searchUniverse(query: string): Promise<Instrument[]> {
   const q = query.trim().toUpperCase();
   if (!q) return [];
+  // Tokenise so multi-word queries work like Angel One: "tata mot" must match
+  // "TMPV" / "Tata Motors Passenger Vehicles" (every term found in symbol+name),
+  // not fail because the raw string has a space no symbol contains.
+  const terms = q.split(/\s+/).filter(Boolean);
 
   const scored: { inst: Instrument; score: number }[] = [];
   const score = (sym: string, name: string): number => {
     const s = sym.toUpperCase();
     const n = name.toUpperCase();
-    if (s === q) return 100;
-    if (s.startsWith(q)) return 80;
-    if (n.startsWith(q)) return 60;
-    if (s.includes(q)) return 40;
-    if (n.includes(q)) return 20;
-    return -1;
+    const hay = `${s} ${n}`;
+    // Require every query term to appear somewhere (symbol or name).
+    if (!terms.every((t) => hay.includes(t))) return -1;
+
+    const words = n.split(/[^A-Z0-9]+/).filter(Boolean);
+    const first = terms[0];
+    // Rank by the strongest signal on the FIRST term; presence of the rest is
+    // already guaranteed above.
+    if (s === q) return 100; // exact symbol
+    if (s.startsWith(first)) return 80; // symbol prefix
+    if (words.some((w) => w.startsWith(first))) return 60; // name-word prefix
+    if (s.includes(first)) return 40; // symbol substring
+    return 20; // name substring only
   };
+
+  const curatedBonus = (sym: string): number =>
+    EQUITY_ANGEL_TOKENS.has(sym) ? 8 : 0; // float well-known names to the top
 
   for (const inst of INDEX_INSTS) {
     const sc = score(inst.symbol, inst.name);
@@ -354,8 +368,11 @@ export async function searchUniverse(query: string): Promise<Instrument[]> {
   const master = await getMaster().catch(() => null);
   if (master) {
     for (const [symbol, row] of master.eqBySymbol) {
-      const sc = score(symbol, row.name || symbol);
-      if (sc >= 0) scored.push({ inst: equityInstrumentFromRow(symbol, row), score: sc });
+      // Score against the DISPLAY instrument (curated name when we have one) so
+      // company-name queries like "tata mot" reach curated symbols like TMPV.
+      const inst = equityInstrumentFromRow(symbol, row);
+      const sc = score(inst.symbol, inst.name);
+      if (sc >= 0) scored.push({ inst, score: sc + curatedBonus(symbol) });
     }
   } else {
     // Master unavailable — fall back to the curated equities so search still works.
@@ -372,7 +389,7 @@ export async function searchUniverse(query: string): Promise<Instrument[]> {
             lotSize: 1,
             tickSize: 0.05,
           },
-          score: sc,
+          score: sc + curatedBonus(e.symbol),
         });
     }
   }

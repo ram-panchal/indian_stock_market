@@ -44,6 +44,9 @@ export interface MarketDataProvider {
   getIndices(): Promise<ListedQuote[]>;
   getMovers(): Promise<Movers>;
   getQuote(token: string): Promise<Quote>;
+  /** Batch quote lookup — one round-trip for many tokens (missing tokens are
+   *  simply absent from the map). Prefer this over N× getQuote in loops. */
+  getQuotes(tokens: string[]): Promise<Map<string, Quote>>;
 
   getOptionUnderlyings(): Promise<Instrument[]>;
   getOptionExpiries(underlyingToken: string): Promise<string[]>;

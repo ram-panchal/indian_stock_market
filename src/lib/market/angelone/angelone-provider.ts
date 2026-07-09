@@ -72,9 +72,28 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Coalescing cache over the batch quote endpoint. Many dashboard cards ask for
+ * overlapping token sets on the same tick (movers is read by 3 cards; sector
+ * perf + 52W lists want the whole equity universe). Without this, each card
+ * fires its own POST and Angel rate-limits us into multi-second stalls. We key
+ * an in-flight/just-resolved promise by the sorted token list and reuse it for
+ * a short window so identical batches share a single round-trip.
+ */
+const QUOTE_COALESCE_MS = 800;
+const quoteBatchCache = new Map<string, { at: number; promise: Promise<QuoteResponse> }>();
+
 async function fetchQuotes(tokens: string[]): Promise<QuoteResponse> {
   if (tokens.length === 0) return { quotes: [], depth: {} };
-  return postJson<QuoteResponse>("/api/angelone/quote", { tokens });
+  const key = [...new Set(tokens)].sort().join(",");
+  const now = Date.now();
+  const hit = quoteBatchCache.get(key);
+  if (hit && now - hit.at < QUOTE_COALESCE_MS) return hit.promise;
+  const promise = postJson<QuoteResponse>("/api/angelone/quote", { tokens });
+  quoteBatchCache.set(key, { at: now, promise });
+  // Drop failed batches immediately so we don't cache an error window.
+  promise.catch(() => quoteBatchCache.delete(key));
+  return promise;
 }
 
 export class AngelOneMarketDataProvider implements MarketDataProvider {
@@ -194,6 +213,11 @@ export class AngelOneMarketDataProvider implements MarketDataProvider {
     const quote = quotes.find((q) => q.token === token);
     if (!quote) throw new Error(`No live quote for ${token}`);
     return quote;
+  }
+
+  async getQuotes(tokens: string[]): Promise<Map<string, Quote>> {
+    const { quotes } = await fetchQuotes(tokens);
+    return new Map(quotes.map((q) => [q.token, q]));
   }
 
   // ----------------------------------------------------------------- options

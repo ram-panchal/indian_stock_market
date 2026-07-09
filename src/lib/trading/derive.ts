@@ -97,6 +97,63 @@ export function unrealizedPnl(pos: Position, ltp: number | undefined): number {
   return (ltp - pos.avgPrice) * pos.netQty;
 }
 
+/** Epoch-ms of the current IST day's 00:00 — the "start of today" boundary. */
+export function istDayStartMs(now = Date.now()): number {
+  const IST = 5.5 * 3600_000;
+  const istMidnight = Math.floor((now + IST) / 86_400_000) * 86_400_000;
+  return istMidnight - IST;
+}
+
+/**
+ * Day's P&L as brokers show it (mark-to-market since the session opened) — NOT
+ * `(ltp − prevClose) × qty`, which wrongly credits a position bought *today* at
+ * the current price with the entire move from yesterday's close (a freshly
+ * bought share at LTP would show a "profit" even with the market shut).
+ *
+ * Per token:  LTP × qtyNow  −  prevClose × qtyHeldAtOpen  −  netCashSpentToday
+ *   • carried shares are marked from yesterday's close (prevClose),
+ *   • shares bought/sold today are marked from their actual trade price,
+ *   • so a same-price same-day buy nets to zero.
+ */
+export function dayPnl(
+  trades: PaperTrade[],
+  getQuote: (token: string) => Quote | undefined,
+  dayStartMs = istDayStartMs(),
+): number {
+  interface Agg {
+    instrumentToken: string;
+    startQty: number; // net qty carried into today
+    nowQty: number; // net qty now
+    todayNetCash: number; // buys − sells executed today (cash out is positive)
+  }
+  const byToken = new Map<string, Agg>();
+  for (const t of [...trades].sort((a, b) => a.at - b.at)) {
+    let e = byToken.get(t.instrument.token);
+    if (!e) {
+      e = { instrumentToken: t.instrument.token, startQty: 0, nowQty: 0, todayNetCash: 0 };
+      byToken.set(t.instrument.token, e);
+    }
+    const signed = t.side === "BUY" ? t.qty : -t.qty;
+    e.nowQty += signed;
+    if (t.at < dayStartMs) e.startQty += signed;
+    else e.todayNetCash += (t.side === "BUY" ? 1 : -1) * t.qty * t.price;
+  }
+
+  let total = 0;
+  for (const e of byToken.values()) {
+    const needsQuote = e.nowQty !== 0 || e.startQty !== 0;
+    if (needsQuote) {
+      const q = getQuote(e.instrumentToken);
+      if (!q) continue; // can't value an open leg without a live quote
+      total += q.ltp * e.nowQty - q.prevClose * e.startQty - e.todayNetCash;
+    } else {
+      // Opened and fully closed today: day P&L is the realized intraday amount.
+      total -= e.todayNetCash;
+    }
+  }
+  return total;
+}
+
 export function openOrders(orders: PaperOrder[]): PaperOrder[] {
   return orders.filter((o) => o.status === "OPEN");
 }

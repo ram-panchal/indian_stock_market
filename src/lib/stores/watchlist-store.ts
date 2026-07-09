@@ -17,7 +17,7 @@ const DEFAULT_TOKENS = [
   EQ("RELIANCE"),
   EQ("HDFCBANK"),
   EQ("INFY"),
-  EQ("TATAMOTORS"),
+  EQ("TMPV"),
 ];
 
 let store: LocalStore<WatchlistItem[]> | null = null;
@@ -27,6 +27,21 @@ function getStore(): LocalStore<WatchlistItem[]> {
     store = new LocalStore<WatchlistItem[]>("im.watchlist.v1", [], (v): v is WatchlistItem[] =>
       Array.isArray(v) && v.every((i) => typeof i?.token === "string" && i?.instrument),
     );
+    // Migrate existing TATAMOTORS items to TMPV
+    const items = store.get();
+    if (items.some((i) => i.token === "EQ:TATAMOTORS")) {
+      store.set(
+        items.map((i) => {
+          if (i.token === "EQ:TATAMOTORS") {
+            return {
+              token: "EQ:TMPV",
+              instrument: { ...i.instrument, token: "EQ:TMPV", symbol: "TMPV", name: "Tata Motors Passenger Vehicles" },
+            };
+          }
+          return i;
+        })
+      );
+    }
   }
   return store;
 }

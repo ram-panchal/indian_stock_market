@@ -3,7 +3,13 @@
 import { useMemo, useState } from "react";
 import { usePaperState } from "@/lib/hooks/use-paper-trading";
 import { useQuotes } from "@/lib/hooks/use-quotes";
-import { computeCash, computePositions, unrealizedPnl } from "@/lib/trading/derive";
+import {
+  computeCash,
+  computePositions,
+  dayPnl,
+  istDayStartMs,
+  unrealizedPnl,
+} from "@/lib/trading/derive";
 import { formatINR } from "@/lib/market/format";
 import { FundsCard } from "./funds-card";
 import { PositionsTable } from "./positions-table";
@@ -38,8 +44,19 @@ export function PortfolioView() {
     [openPositions],
   );
 
+  // Tokens we need live quotes for: open positions plus anything traded today
+  // (a position opened *and closed* today still contributes to day's P&L).
+  const dayStart = istDayStartMs();
+  const quoteTokens = useMemo(() => {
+    const set = new Set(openPositions.map((p) => p.instrument.token));
+    for (const t of state.trades) {
+      if (t.at >= dayStart) set.add(t.instrument.token);
+    }
+    return [...set];
+  }, [openPositions, state.trades, dayStart]);
+
   // Live totals — recomputed from trades + current quotes on every render.
-  const quotes = useQuotes(openPositions.map((p) => p.instrument.token));
+  const quotes = useQuotes(quoteTokens);
   const totalUnrealized = openPositions.reduce(
     (sum, p) => sum + unrealizedPnl(p, quotes.get(p.instrument.token)?.ltp),
     0,
@@ -52,11 +69,11 @@ export function PortfolioView() {
     (sum, p) => sum + p.avgPrice * Math.abs(p.netQty),
     0,
   );
-  const dayPnl = openPositions.reduce((sum, p) => {
-    const q = quotes.get(p.instrument.token);
-    if (!q) return sum;
-    return sum + (q.ltp - q.prevClose) * p.netQty;
-  }, 0);
+  const dayPnlValue = dayPnl(
+    state.trades,
+    (token) => quotes.get(token),
+    dayStart,
+  );
   const cash = computeCash(state);
   const marketValue = openPositions.reduce((sum, p) => {
     const q = quotes.get(p.instrument.token);
@@ -80,8 +97,8 @@ export function PortfolioView() {
           <StatTile title="Total P&L" hint={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}% return`}>
             <PnlText value={totalPnl} className="text-xl font-semibold" />
           </StatTile>
-          <StatTile title="Day's P&L" hint="vs prev close">
-            <PnlText value={dayPnl} className="text-xl font-semibold" />
+          <StatTile title="Day's P&L" hint="mark-to-market today">
+            <PnlText value={dayPnlValue} className="text-xl font-semibold" />
           </StatTile>
           <StatTile title="Invested" hint={`${openPositions.length} open`}>
             <span className="tnum text-base font-semibold text-ink">

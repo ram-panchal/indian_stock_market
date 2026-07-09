@@ -104,7 +104,7 @@ export const EQUITIES: SeedInstrument[] = [
   equity("ASIANPAINT", "Asian Paints", 2408, 0.16, 14),
   equity("NTPC", "NTPC", 362, 0.18, 140),
   equity("POWERGRID", "Power Grid Corporation", 321, 0.16, 110),
-  equity("TATAMOTORS", "Tata Motors", 988, 0.24, 125),
+  equity("TMPV", "Tata Motors Passenger Vehicles", 988, 0.24, 125),
   equity("TATASTEEL", "Tata Steel", 166, 0.23, 380),
   equity("JSWSTEEL", "JSW Steel", 942, 0.21, 45),
   equity("WIPRO", "Wipro", 492, 0.19, 90),

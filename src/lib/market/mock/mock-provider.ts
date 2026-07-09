@@ -77,6 +77,15 @@ export class MockMarketDataProvider implements MarketDataProvider {
     return q;
   }
 
+  async getQuotes(tokens: string[]): Promise<Map<string, Quote>> {
+    const out = new Map<string, Quote>();
+    for (const token of tokens) {
+      const q = this.engine.getQuote(token);
+      if (q) out.set(token, q);
+    }
+    return out;
+  }
+
   async getOptionUnderlyings(): Promise<Instrument[]> {
     const out: Instrument[] = [];
     for (const token of OPTION_UNDERLYING_TOKENS) {

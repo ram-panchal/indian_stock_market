@@ -176,7 +176,7 @@ export interface SectorPerf {
 const SECTOR_MAP: { name: string; symbols: string[] }[] = [
   { name: "Nifty IT", symbols: ["INFY", "TCS", "WIPRO", "HCLTECH", "TECHM"] },
   { name: "Nifty Bank", symbols: ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK"] },
-  { name: "Nifty Auto", symbols: ["MARUTI", "M&M", "TATAMOTORS", "EICHERMOT", "HEROMOTOCO"] },
+  { name: "Nifty Auto", symbols: ["MARUTI", "M&M", "TMPV", "EICHERMOT", "HEROMOTOCO"] },
   { name: "Nifty FMCG", symbols: ["HINDUNILVR", "ITC", "NESTLEIND"] },
   { name: "Nifty Pharma", symbols: ["SUNPHARMA", "DRREDDY", "CIPLA"] },
   { name: "Nifty Metal", symbols: ["TATASTEEL", "JSWSTEEL", "COALINDIA"] },
@@ -186,12 +186,15 @@ const SECTOR_MAP: { name: string; symbols: string[] }[] = [
 export async function getSectorPerformance(
   provider: MarketDataProvider,
 ): Promise<SectorPerf[]> {
+  // One batched quote call for every sector constituent — not N× getQuote,
+  // which would flood the live provider with per-symbol round-trips.
+  const tokens = [...new Set(SECTOR_MAP.flatMap((s) => s.symbols.map(EQ)))];
+  const quotes = await provider.getQuotes(tokens);
   const out: SectorPerf[] = [];
   for (const sector of SECTOR_MAP) {
-    const quotes = await Promise.all(
-      sector.symbols.map((s) => provider.getQuote(EQ(s)).catch(() => undefined)),
-    );
-    const valid = quotes.filter((q) => q !== undefined);
+    const valid = sector.symbols
+      .map((s) => quotes.get(EQ(s)))
+      .filter((q) => q !== undefined);
     if (valid.length === 0) continue;
     out.push({
       name: sector.name,
@@ -207,19 +210,14 @@ export async function getSectorPerformance(
 export async function getAllListedQuotes(
   provider: MarketDataProvider,
 ): Promise<ListedQuote[]> {
-  const rows = await Promise.all(
-    EQUITIES.map(async (seed) => {
-      try {
-        return {
-          instrument: seed.instrument,
-          quote: await provider.getQuote(seed.instrument.token),
-        };
-      } catch {
-        return null;
-      }
-    }),
+  // Single batched round-trip for the whole curated universe.
+  const quotes = await provider.getQuotes(
+    EQUITIES.map((seed) => seed.instrument.token),
   );
-  return rows.filter((r) => r !== null);
+  return EQUITIES.flatMap((seed) => {
+    const quote = quotes.get(seed.instrument.token);
+    return quote ? [{ instrument: seed.instrument, quote }] : [];
+  });
 }
 
 // ------------------------------------------------------------- 52-week lists
