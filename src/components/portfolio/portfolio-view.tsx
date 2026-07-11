@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePaperState } from "@/lib/hooks/use-paper-trading";
 import { useQuotes } from "@/lib/hooks/use-quotes";
 import {
@@ -31,6 +31,17 @@ export function PortfolioView() {
   const state = usePaperState();
   const [tab, setTab] = useState<Tab>("positions");
 
+  // Wall-clock read lives in an effect, not render, per this project's
+  // purity rules (see useMarketStatus for the same pattern). The day
+  // boundary only moves once every 24h, so a coarse refresh is plenty.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNowMs(Date.now());
+    tick();
+    const timer = setInterval(tick, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const positions = useMemo(() => computePositions(state.trades), [state.trades]);
   const openPositions = useMemo(
     () => positions.filter((p) => p.netQty !== 0),
@@ -46,7 +57,9 @@ export function PortfolioView() {
 
   // Tokens we need live quotes for: open positions plus anything traded today
   // (a position opened *and closed* today still contributes to day's P&L).
-  const dayStart = istDayStartMs();
+  // Derived from the effect-driven nowMs (not Date.now() directly) to keep
+  // the wall-clock read out of render, per this project's purity rules.
+  const dayStart = istDayStartMs(nowMs ?? 0);
   const quoteTokens = useMemo(() => {
     const set = new Set(openPositions.map((p) => p.instrument.token));
     for (const t of state.trades) {

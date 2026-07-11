@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import Link from "next/link";
 import type { Position } from "@/lib/trading/types";
 import { useQuote } from "@/lib/hooks/use-quote";
@@ -70,14 +70,18 @@ const PositionRow = memo(function PositionRow({
   const quote = useQuote(inst.token);
   const toast = useToast();
   const pnl = unrealizedPnl(position, quote?.ltp);
+  const [closing, setClosing] = useState(false);
 
   const closePosition = async () => {
+    if (closing) return;
+    setClosing(true);
     const result = await getPaperTradingEngine().placeOrder({
       instrument: inst,
       side: position.netQty > 0 ? "SELL" : "BUY",
       type: "MARKET",
       qty: Math.abs(position.netQty),
     });
+    setClosing(false);
     toast(
       result.ok
         ? {
@@ -128,9 +132,10 @@ const PositionRow = memo(function PositionRow({
       <td className="px-3 py-2 text-right">
         <button
           onClick={closePosition}
-          className="rounded border border-border px-2 py-0.5 text-[10px] text-ink-2 hover:border-down hover:text-down"
+          disabled={closing}
+          className="rounded border border-border px-2 py-0.5 text-[10px] text-ink-2 hover:border-down hover:text-down disabled:opacity-50"
         >
-          Close
+          {closing ? "Closing…" : "Close"}
         </button>
       </td>
     </tr>

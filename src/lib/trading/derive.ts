@@ -12,6 +12,8 @@ export interface RealizedEvent {
   token: string;
   symbol: string;
   amount: number;
+  /** The trade that booked this realization — lets callers (e.g. chart markers) attribute P&L to one fill. */
+  tradeId: string;
 }
 
 /** Average-cost position building (matches how Indian brokers display it). */
@@ -63,6 +65,7 @@ export function computePositions(
         token: trade.instrument.token,
         symbol: trade.instrument.symbol,
         amount: realized,
+        tradeId: trade.id,
       });
       pos.netQty += signedQty;
       if (pos.netQty === 0) {

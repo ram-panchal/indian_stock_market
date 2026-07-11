@@ -39,8 +39,27 @@ export interface ChartTheme {
   accent: string;
 }
 
+/** A filled paper trade, positioned on the chart at its fill time/price. */
+export interface TradeMarker {
+  /** PaperTrade.id — also used as the lightweight-charts marker id, so
+   *  hovering a marker can be matched back to this trade via CrosshairInfo. */
+  id: string;
+  /** Epoch seconds (same units as Candle.time). */
+  time: number;
+  side: "BUY" | "SELL";
+  price: number;
+  qty: number;
+  orderId: string;
+  /** Realized P&L booked by this trade, if it closed/reduced a position. */
+  pnl?: number;
+}
+
 export interface CrosshairInfo {
   candle: Candle | null;
+  /** The TradeMarker under the cursor, if any. */
+  marker: TradeMarker | null;
+  /** Pixel position of the cursor within the chart container, for tooltip placement. */
+  point: { x: number; y: number } | null;
 }
 
 export interface ChartEngine {
@@ -57,6 +76,8 @@ export interface ChartEngine {
   ): void;
   /** Merge/append the live forming bar. */
   updateLast(candle: Candle): void;
+  /** Replace all trade markers shown on the chart (filtered to one instrument by the caller). */
+  setTradeMarkers(markers: TradeMarker[]): void;
   setIndicators(ids: IndicatorId[]): void;
   onCrosshair(cb: (info: CrosshairInfo) => void): void;
   fitContent(): void;

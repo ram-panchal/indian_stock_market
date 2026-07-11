@@ -71,6 +71,11 @@ export class PaperTradingEngine {
   private listeners = new Set<() => void>();
   /** orderId → unsubscribe for the limit-order tick watcher. */
   private watchers = new Map<string, () => void>();
+  /** Instrument tokens with a placeOrder() call currently between its quote
+   *  fetch and its commit — guards the check-then-act window in validate()
+   *  against a second call racing in (e.g. a double-clicked Close button)
+   *  before the first one's fill has been persisted to state. */
+  private pending = new Set<string>();
 
   constructor() {
     this.state = this.load();
@@ -134,48 +139,56 @@ export class PaperTradingEngine {
         return { ok: false, reason: "Limit orders need a valid limit price." };
     }
 
-    let quote: Quote;
+    if (this.pending.has(instrument.token))
+      return { ok: false, reason: "An order for this instrument is already being placed." };
+    this.pending.add(instrument.token);
+
     try {
-      const handle = getProviderHandle();
-      await handle.ready;
-      quote = await handle.provider.getQuote(instrument.token);
-    } catch {
-      return { ok: false, reason: "No market data available for this instrument." };
+      let quote: Quote;
+      try {
+        const handle = getProviderHandle();
+        await handle.ready;
+        quote = await handle.provider.getQuote(instrument.token);
+      } catch {
+        return { ok: false, reason: "No market data available for this instrument." };
+      }
+
+      const validation = await this.validate(input, quote);
+      if (validation) return { ok: false, reason: validation };
+
+      const order: PaperOrder = {
+        id: newId(),
+        createdAt: Date.now(),
+        instrument,
+        side,
+        type,
+        qty,
+        limitPrice: input.limitPrice,
+        status: "OPEN",
+      };
+
+      if (type === "MARKET") {
+        // Fill at the touch: buy at ask, sell at bid (ltp fallback).
+        const price = side === "BUY" ? quote.ask || quote.ltp : quote.bid || quote.ltp;
+        this.commit(this.withFill({ ...this.state }, order, price));
+        return { ok: true, order: { ...order, status: "FILLED" } };
+      }
+
+      const limit = input.limitPrice!;
+      const marketable =
+        side === "BUY" ? quote.ask > 0 && quote.ask <= limit : quote.bid >= limit;
+      if (marketable) {
+        const price = side === "BUY" ? quote.ask : quote.bid;
+        this.commit(this.withFill({ ...this.state }, order, price));
+        return { ok: true, order: { ...order, status: "FILLED" } };
+      }
+
+      this.commit({ ...this.state, orders: [...this.state.orders, order] });
+      this.watchOrder(order.id);
+      return { ok: true, order };
+    } finally {
+      this.pending.delete(instrument.token);
     }
-
-    const validation = await this.validate(input, quote);
-    if (validation) return { ok: false, reason: validation };
-
-    const order: PaperOrder = {
-      id: newId(),
-      createdAt: Date.now(),
-      instrument,
-      side,
-      type,
-      qty,
-      limitPrice: input.limitPrice,
-      status: "OPEN",
-    };
-
-    if (type === "MARKET") {
-      // Fill at the touch: buy at ask, sell at bid (ltp fallback).
-      const price = side === "BUY" ? quote.ask || quote.ltp : quote.bid || quote.ltp;
-      this.commit(this.withFill({ ...this.state }, order, price));
-      return { ok: true, order: { ...order, status: "FILLED" } };
-    }
-
-    const limit = input.limitPrice!;
-    const marketable =
-      side === "BUY" ? quote.ask > 0 && quote.ask <= limit : quote.bid >= limit;
-    if (marketable) {
-      const price = side === "BUY" ? quote.ask : quote.bid;
-      this.commit(this.withFill({ ...this.state }, order, price));
-      return { ok: true, order: { ...order, status: "FILLED" } };
-    }
-
-    this.commit({ ...this.state, orders: [...this.state.orders, order] });
-    this.watchOrder(order.id);
-    return { ok: true, order };
   }
 
   cancelOrder(orderId: string): void {

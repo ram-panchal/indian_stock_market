@@ -121,7 +121,13 @@ export async function getMaster(): Promise<Master> {
   if (cached && Date.now() - cached.builtAt < MASTER_TTL_MS) return cached;
   if (inflight) return inflight;
   inflight = (async () => {
-    const res = await fetch(SCRIP_MASTER_URL, { cache: "no-store" });
+    // Without a timeout, a stalled connection on this ~30MB+ file would hang
+    // `inflight` forever — since it's only cleared in .finally() below, every
+    // caller (including a retry) would just keep re-awaiting the same stuck
+    // promise rather than ever getting a fresh attempt.
+    // Measured in practice at ~56KB/s on this connection at times — this
+    // ~34MB file can genuinely take several minutes, not just be stalled.
+    const res = await fetch(SCRIP_MASTER_URL, { cache: "no-store", signal: AbortSignal.timeout(6 * 60_000) });
     if (!res.ok) throw new Error(`Instrument master fetch failed: HTTP ${res.status}`);
     const rows = (await res.json()) as ScripRow[];
     cached = buildMaster(rows);

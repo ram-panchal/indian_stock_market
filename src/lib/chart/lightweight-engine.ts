@@ -11,11 +11,16 @@ import {
   HistogramSeries,
   LineSeries,
   createChart,
+  createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, Timeframe } from "@/lib/market/types";
+import { formatPrice } from "@/lib/market/format";
 import { bollinger, ema, macd, rsi, sma, vwap } from "@/lib/indicators";
 import type {
   ChartEngine,
@@ -23,6 +28,7 @@ import type {
   CrosshairInfo,
   DrawingTool,
   IndicatorId,
+  TradeMarker,
 } from "./chart-engine";
 import { DrawingLayer } from "./drawings";
 
@@ -36,11 +42,13 @@ export class LightweightChartEngine implements ChartEngine {
   private chart: IChartApi | null = null;
   private candleSeries: ISeriesApi<"Candlestick"> | null = null;
   private volumeSeries: ISeriesApi<"Histogram"> | null = null;
+  private markersPlugin: ISeriesMarkersPluginApi<Time> | null = null;
   private indicatorSeries = new Map<string, AnySeries>();
   private drawingLayer: DrawingLayer | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   private candles: Candle[] = [];
+  private tradeMarkers: TradeMarker[] = [];
   private timeframe: Timeframe = "5m";
   private activeIndicators: IndicatorId[] = [];
   private theme: ChartTheme;
@@ -101,13 +109,20 @@ export class LightweightChartEngine implements ChartEngine {
       .priceScale("volume")
       .applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
+    this.markersPlugin = createSeriesMarkers(this.candleSeries, []);
+
     this.chart.subscribeCrosshairMove((param) => {
       if (!this.crosshairCb || !this.candleSeries) return;
       const bar = param.seriesData.get(this.candleSeries) as
         | { open: number; high: number; low: number; close: number; time: number }
         | undefined;
+      const markerId = param.hoveredObjectId as string | undefined;
+      const marker = markerId
+        ? (this.tradeMarkers.find((m) => m.id === markerId) ?? null)
+        : null;
+      const point = param.point ? { x: param.point.x, y: param.point.y } : null;
       if (!bar) {
-        this.crosshairCb({ candle: null });
+        this.crosshairCb({ candle: null, marker, point });
         return;
       }
       this.crosshairCb({
@@ -119,6 +134,8 @@ export class LightweightChartEngine implements ChartEngine {
           close: bar.close,
           volume: 0,
         },
+        marker,
+        point,
       });
     });
 
@@ -151,6 +168,7 @@ export class LightweightChartEngine implements ChartEngine {
     this.chart = null;
     this.candleSeries = null;
     this.volumeSeries = null;
+    this.markersPlugin = null;
     this.indicatorSeries.clear();
   }
 
@@ -179,6 +197,7 @@ export class LightweightChartEngine implements ChartEngine {
       wickDownColor: theme.down,
     });
     this.refreshVolume();
+    this.applyMarkers();
   }
 
   setCandles(
@@ -202,6 +221,7 @@ export class LightweightChartEngine implements ChartEngine {
     this.refreshVolume();
     this.refreshIndicators();
     this.drawingLayer?.setChartKey(`${chartKey}`);
+    this.drawingLayer?.notifyDataChanged();
     if (fit) this.chart.timeScale().fitContent();
   }
 
@@ -225,6 +245,32 @@ export class LightweightChartEngine implements ChartEngine {
       color: this.volumeColor(candle),
     });
     this.refreshIndicators();
+    this.drawingLayer?.notifyDataChanged();
+  }
+
+  setTradeMarkers(markers: TradeMarker[]): void {
+    this.tradeMarkers = markers;
+    this.applyMarkers();
+  }
+
+  private applyMarkers(): void {
+    if (!this.markersPlugin) return;
+    const sorted = [...this.tradeMarkers].sort((a, b) => a.time - b.time);
+    const rendered: SeriesMarker<Time>[] = sorted.map((m) => {
+      const isBuy = m.side === "BUY";
+      const pnlSuffix =
+        m.pnl !== undefined ? ` ${m.pnl >= 0 ? "+" : ""}${formatPrice(m.pnl)}` : "";
+      return {
+        id: m.id,
+        time: (m.time + IST_SHIFT_SEC) as UTCTimestamp,
+        position: isBuy ? "belowBar" : "aboveBar",
+        shape: isBuy ? "arrowUp" : "arrowDown",
+        color: isBuy ? this.theme.up : this.theme.down,
+        text: `${isBuy ? "B" : "S"} ${m.qty}@${formatPrice(m.price)}${pnlSuffix}`,
+        size: 1.4,
+      };
+    });
+    this.markersPlugin.setMarkers(rendered);
   }
 
   fitContent(): void {
@@ -252,6 +298,7 @@ export class LightweightChartEngine implements ChartEngine {
   setIndicators(ids: IndicatorId[]): void {
     this.activeIndicators = [...ids];
     this.refreshIndicators(true);
+    this.drawingLayer?.notifyDataChanged();
   }
 
   private volumeColor(c: Candle): string {

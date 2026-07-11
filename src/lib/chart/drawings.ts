@@ -50,8 +50,11 @@ export class DrawingLayer {
   private hover: Point | null = null;
   private tool: DrawingTool | null = null;
   private chartKey = "";
-  private raf = 0;
   private toolDoneCb: (() => void) | null = null;
+  private resizeObserver: ResizeObserver;
+  private rafScheduled = false;
+  private raf = 0;
+  private visibleRangeHandler = () => this.scheduleRender();
 
   constructor(
     private container: HTMLElement,
@@ -67,16 +70,24 @@ export class DrawingLayer {
     this.ctx = this.canvas.getContext("2d")!;
     this.canvas.addEventListener("pointerdown", this.onPointerDown);
     this.canvas.addEventListener("pointermove", this.onPointerMove);
-    this.loop();
+    // Redraw only on things that can actually move the overlay: pan/zoom and
+    // container resize. Avoids a permanent 60fps loop when the chart is idle.
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(this.visibleRangeHandler);
+    this.resizeObserver = new ResizeObserver(() => this.scheduleRender());
+    this.resizeObserver.observe(container);
+    this.scheduleRender();
   }
 
   destroy(): void {
-    cancelAnimationFrame(this.raf);
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.chart.timeScale().unsubscribeVisibleLogicalRangeChange(this.visibleRangeHandler);
+    this.resizeObserver.disconnect();
     this.canvas.remove();
   }
 
   setTheme(theme: ChartTheme): void {
     this.theme = theme;
+    this.scheduleRender();
   }
 
   setChartKey(key: string): void {
@@ -84,6 +95,7 @@ export class DrawingLayer {
     this.chartKey = key;
     this.pending = null;
     this.drawings = loadAll()[key] ?? [];
+    this.scheduleRender();
   }
 
   setTool(tool: DrawingTool | null): void {
@@ -93,6 +105,24 @@ export class DrawingLayer {
     // working the rest of the time.
     this.canvas.style.pointerEvents = tool ? "auto" : "none";
     this.canvas.style.cursor = tool === "erase" ? "not-allowed" : "crosshair";
+    this.scheduleRender();
+  }
+
+  /** Call after new candle/indicator data lands — a moved price scale (autoscale
+   *  on a live tick) shifts every anchor's pixel position even though nothing
+   *  about the drawings themselves changed. */
+  notifyDataChanged(): void {
+    this.scheduleRender();
+  }
+
+  /** Coalesce bursts (pointermove, rapid data updates) into one paint per frame. */
+  private scheduleRender(): void {
+    if (this.rafScheduled) return;
+    this.rafScheduled = true;
+    this.raf = requestAnimationFrame(() => {
+      this.rafScheduled = false;
+      this.render();
+    });
   }
 
   onToolDone(cb: () => void): void {
@@ -113,6 +143,7 @@ export class DrawingLayer {
     } catch {
       // Best-effort.
     }
+    this.scheduleRender();
   }
 
   // ------------------------------------------------------------- pointers
@@ -160,6 +191,7 @@ export class DrawingLayer {
   private onPointerMove = (ev: PointerEvent): void => {
     if (!this.tool || !this.pending) return;
     this.hover = this.eventPoint(ev);
+    this.scheduleRender();
   };
 
   private eraseNear(x: number, y: number): void {
@@ -191,11 +223,6 @@ export class DrawingLayer {
     }
     return out;
   }
-
-  private loop = (): void => {
-    this.render();
-    this.raf = requestAnimationFrame(this.loop);
-  };
 
   private render(): void {
     const { width, height } = this.container.getBoundingClientRect();

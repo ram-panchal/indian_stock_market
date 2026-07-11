@@ -6,23 +6,26 @@
  * currently LightweightChartEngine (open-source lightweight-charts).
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Candle, Instrument, Timeframe } from "@/lib/market/types";
 import { TIMEFRAME_SECONDS } from "@/lib/market/types";
 import { getProviderHandle } from "@/lib/market/provider-factory";
 import { getPriceStore } from "@/lib/market/price-store";
-import { formatCompact, formatPrice } from "@/lib/market/format";
+import { formatCompact, formatISTDateTime, formatPrice } from "@/lib/market/format";
 import {
   INDICATOR_LABELS,
   type ChartEngine,
   type ChartTheme,
   type DrawingTool,
   type IndicatorId,
+  type TradeMarker,
 } from "@/lib/chart/chart-engine";
 import { LightweightChartEngine } from "@/lib/chart/lightweight-engine";
 import { useTheme } from "@/components/theme/theme-provider";
 import { useTradeTicket } from "@/components/trading/trade-ticket";
-import { ChangeCell, LtpCell } from "@/components/market/price-cells";
+import { usePaperState } from "@/lib/hooks/use-paper-trading";
+import { computePositions } from "@/lib/trading/derive";
+import { ChangeCell, LtpCell, PnlText } from "@/components/market/price-cells";
 import { SymbolChip } from "@/components/ui/symbol-chip";
 import { DepthTable } from "@/components/market/depth-table";
 
@@ -64,6 +67,9 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
   const [tool, setTool] = useState<DrawingTool | null>(null);
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [hovered, setHovered] = useState<Candle | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<TradeMarker | null>(null);
+  const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(null);
+  const [containerWidth, setContainerWidth] = useState(640);
   const [error, setError] = useState<string | null>(null);
   // "Loading" is derived: the chart has finished loading once the token+timeframe
   // it last rendered matches the current selection (no setState-in-effect).
@@ -72,9 +78,29 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
 
   const { theme } = useTheme();
   const ticket = useTradeTicket();
+  const paperState = usePaperState();
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ChartEngine | null>(null);
   const lastBarRef = useRef<Candle | null>(null);
+
+  // Buy/sell markers for this instrument, derived from the same trade log
+  // that drives Portfolio/Orders/Trades — so they persist through refresh for
+  // free and never fall out of sync with what actually got filled.
+  const markers = useMemo<TradeMarker[]>(() => {
+    const realizedByTrade = new Map<string, number>();
+    computePositions(paperState.trades, (e) => realizedByTrade.set(e.tradeId, e.amount));
+    return paperState.trades
+      .filter((t) => t.instrument.token === token)
+      .map((t) => ({
+        id: t.id,
+        time: Math.floor(t.at / 1000),
+        side: t.side,
+        price: t.price,
+        qty: t.qty,
+        orderId: t.orderId,
+        pnl: realizedByTrade.get(t.id),
+      }));
+  }, [paperState.trades, token]);
 
   // Resolve instrument metadata whenever the token changes.
   useEffect(() => {
@@ -102,7 +128,11 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
     if (!containerRef.current) return;
     const engine = new LightweightChartEngine(readChartTheme());
     engine.mount(containerRef.current);
-    engine.onCrosshair(({ candle }) => setHovered(candle));
+    engine.onCrosshair(({ candle, marker, point }) => {
+      setHovered(candle);
+      setHoveredMarker(marker);
+      setCursorPoint(point);
+    });
     engine.onToolDone(() => setTool(null));
     engineRef.current = engine;
     return () => {
@@ -115,6 +145,25 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
   useEffect(() => {
     engineRef.current?.setTheme(readChartTheme());
   }, [theme]);
+
+  // Push this instrument's buy/sell markers whenever the trade log changes —
+  // covers new fills, and re-renders history correctly after a refresh.
+  useEffect(() => {
+    engineRef.current?.setTradeMarkers(markers);
+  }, [markers]);
+
+  // Track container width for tooltip clamping (read in an effect, not
+  // during render, so the ref access stays outside the pure render pass).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setContainerWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Load history + reconcile periodically (mock candle cache is cheap; a
   // real feed would replace the reconcile with proper bar streams).
@@ -192,6 +241,17 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
   }, []);
 
   const legend = hovered;
+
+  const tooltipStyle = (() => {
+    if (!cursorPoint) return undefined;
+    const tooltipWidth = 196;
+    const left =
+      cursorPoint.x + 14 + tooltipWidth > containerWidth
+        ? Math.max(4, cursorPoint.x - tooltipWidth - 14)
+        : cursorPoint.x + 14;
+    const top = Math.max(8, cursorPoint.y - 60);
+    return { left: `${left}px`, top: `${top}px` };
+  })();
 
   return (
     <div className="flex h-[calc(100dvh-9rem)] min-h-[420px] flex-col md:h-[calc(100dvh-5rem)]">
@@ -330,6 +390,48 @@ export function ChartWorkspace({ initialToken }: { initialToken: string }) {
           {loading ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-ink-3">
               Loading chart…
+            </div>
+          ) : null}
+          {hoveredMarker ? (
+            <div
+              className="pointer-events-none absolute z-20 w-[196px] rounded-md border border-border bg-surface px-3 py-2 text-[11px] shadow-xl"
+              style={tooltipStyle}
+            >
+              <p
+                className={`font-semibold ${hoveredMarker.side === "BUY" ? "text-up" : "text-down"}`}
+              >
+                {hoveredMarker.side === "BUY" ? "Buy" : "Sell"} filled
+              </p>
+              <dl className="mt-1.5 space-y-1 text-ink-2">
+                <div className="flex justify-between">
+                  <dt>Price</dt>
+                  <dd className="tnum text-ink">{formatPrice(hoveredMarker.price)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>Qty</dt>
+                  <dd className="tnum text-ink">{hoveredMarker.qty}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>Time</dt>
+                  <dd className="tnum text-ink">
+                    {formatISTDateTime(hoveredMarker.time * 1000)}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>Order</dt>
+                  <dd className="tnum text-ink-3" title={hoveredMarker.orderId}>
+                    {hoveredMarker.orderId.slice(0, 8)}
+                  </dd>
+                </div>
+                {hoveredMarker.pnl !== undefined ? (
+                  <div className="flex justify-between border-t border-border pt-1">
+                    <dt>P&amp;L</dt>
+                    <dd className="tnum">
+                      <PnlText value={hoveredMarker.pnl} />
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
             </div>
           ) : null}
         </div>

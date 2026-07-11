@@ -61,6 +61,31 @@ export function rsi(candles: Candle[], period = 14): IndicatorPoint[] {
   return out;
 }
 
+/** Average True Range (Wilder smoothing) — used to scale stop/target
+ *  distances to each instrument's own volatility rather than a flat %. */
+export function atr(candles: Candle[], period = 14): IndicatorPoint[] {
+  if (candles.length <= period) return [];
+  const trueRange = (i: number): number => {
+    const c = candles[i];
+    const prev = candles[i - 1];
+    return Math.max(
+      c.high - c.low,
+      Math.abs(c.high - prev.close),
+      Math.abs(c.low - prev.close),
+    );
+  };
+  const out: IndicatorPoint[] = [];
+  let avg = 0;
+  for (let i = 1; i <= period; i++) avg += trueRange(i);
+  avg /= period;
+  out.push({ time: candles[period].time, value: avg });
+  for (let i = period + 1; i < candles.length; i++) {
+    avg = (avg * (period - 1) + trueRange(i)) / period;
+    out.push({ time: candles[i].time, value: avg });
+  }
+  return out;
+}
+
 export interface MacdResult {
   macd: IndicatorPoint[];
   signal: IndicatorPoint[];

@@ -34,6 +34,7 @@ const NAV = [
   { href: "/options", label: "Option chain" },
   { href: "/charts", label: "Charts" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/strategy", label: "Daily Pick" },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -267,7 +268,7 @@ function MobileNav() {
   const pathname = usePathname();
   const router = useRouter();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-60 grid grid-cols-4 border-t border-border bg-surface md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-60 grid grid-cols-5 border-t border-border bg-surface md:hidden">
       {NAV.map((item) => {
         const active =
           item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);

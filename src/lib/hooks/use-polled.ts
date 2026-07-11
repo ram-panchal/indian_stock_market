@@ -36,10 +36,17 @@ export function usePolled<T>(
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setInterval> | null = null;
     setState((s) => ({ ...s, isLoading: true }));
 
     const run = async () => {
+      // Skip this tick rather than overlap a still-in-flight fetch — on a
+      // slow network two overlapping requests can resolve out of order, and
+      // whichever lands last would silently win over whichever was requested
+      // last.
+      if (inFlight) return;
+      inFlight = true;
       const handle = getProviderHandle();
       await handle.ready;
       try {
@@ -53,6 +60,8 @@ export function usePolled<T>(
             error: err instanceof Error ? err.message : "Failed to load data",
             isLoading: false,
           }));
+      } finally {
+        inFlight = false;
       }
     };
 
